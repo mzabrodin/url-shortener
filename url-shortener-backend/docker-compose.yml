@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: url-shortener-postgres
+    ports:
+      - "${DB_PORT}:5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_NAME}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: url-shortener-redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: packages/gateway/Dockerfile
+    ports:
+      - "${GATEWAY_PORT}:${GATEWAY_PORT}"
+    environment:
+      PORT: ${GATEWAY_PORT}
+      SHORTEN_URL: http://shorten:${SHORTEN_PORT}
+      REDIRECT_URL: http://redirect:${REDIRECT_PORT}
+      STATS_URL: http://stats:${STATS_PORT}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      CLIENT_URL: ${CLIENT_URL}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      - shorten
+      - redirect
+      - stats
+
+  shorten:
+    build:
+      context: .
+      dockerfile: packages/shorten/Dockerfile
+    environment:
+      PORT: ${SHORTEN_PORT}
+      DATABASE_URL: postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=${DB_SSL_MODE}
+      BASE_URL: http://localhost:${GATEWAY_PORT}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redirect:
+    build:
+      context: .
+      dockerfile: packages/redirect/Dockerfile
+    environment:
+      PORT: ${REDIRECT_PORT}
+      DATABASE_URL: postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=${DB_SSL_MODE}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST}:6379
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS}
+      NEGATIVE_CACHE_TTL_SECONDS: ${NEGATIVE_CACHE_TTL_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  stats:
+    build:
+      context: .
+      dockerfile: packages/stats/Dockerfile
+    environment:
+      PORT: ${STATS_PORT}
+      DATABASE_URL: postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=${DB_SSL_MODE}
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics:
+    build:
+      context: .
+      dockerfile: packages/analytics/Dockerfile
+    environment:
+      DATABASE_URL: postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=${DB_SSL_MODE}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@${REDIS_HOST}:6379
+      LOG_LEVEL: ${LOG_LEVEL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
