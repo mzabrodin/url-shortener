@@ -1,5 +1,11 @@
 import Fastify from 'fastify';
-import {createDb, errorHandler, registerGracefulShutdown} from '@url-shortener/shared';
+import {
+  createDb,
+  errorHandler,
+  registerGracefulShutdown,
+  codeParamsSchema,
+  CodeParams,
+} from '@url-shortener/shared';
 
 const PORT = Number(process.env.PORT!);
 const DATABASE_URL = process.env.DATABASE_URL!;
@@ -7,36 +13,29 @@ const DATABASE_URL = process.env.DATABASE_URL!;
 const db = createDb(DATABASE_URL);
 
 async function main() {
-  const fastify = Fastify({logger: {level: process.env.LOG_LEVEL!}});
+  const fastify = Fastify({ logger: { level: process.env.LOG_LEVEL! } });
 
   fastify.setErrorHandler(errorHandler);
 
-  fastify.get<{ Params: { code: string } }>('/stats/:code', {
-    schema: {
-      params: {
-        type: 'object',
-        required: ['code'],
-        properties: {
-          code: {type: 'string', maxLength: 7, pattern: '^[a-zA-Z0-9_-]+$'}
-        }
-      }
-    }
-  }, async (req, reply) => {
-    const {code} = req.params;
+  fastify.get<{ Params: CodeParams }>(
+    '/stats/:code',
+    { schema: { params: codeParamsSchema } },
+    async (req, reply) => {
+      const { code } = req.params;
 
-    const [url] = await db<{ long_url: string }[]>`
+      const [url] = await db<{ long_url: string }[]>`
       SELECT long_url FROM urls WHERE code = ${code}
     `;
 
-    if (!url) {
-      return reply.code(404).send({error: 'Not found'});
-    }
+      if (!url) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
 
-    const [totals] = await db<{ total: string }[]>`
+      const [totals] = await db<{ total: string }[]>`
       SELECT COUNT(*) AS total FROM clicks WHERE code = ${code}
     `;
 
-    const daily = await db<{ date: string; total: string }[]>`
+      const daily = await db<{ date: string; total: string }[]>`
       SELECT DATE(clicked_at) AS date, COUNT(*) AS total
       FROM clicks
       WHERE code = ${code}
@@ -45,13 +44,14 @@ async function main() {
       LIMIT 30
     `;
 
-    return reply.send({
-      code,
-      longUrl: url.long_url,
-      totalClicks: Number(totals.total),
-      daily: daily.map(row => ({date: row.date, clicks: Number(row.total)}))
-    });
-  });
+      return reply.send({
+        code,
+        longUrl: url.long_url,
+        totalClicks: Number(totals.total),
+        daily: daily.map((row) => ({ date: row.date, clicks: Number(row.total) })),
+      });
+    },
+  );
 
   fastify.get('/stats', async (_req, reply) => {
     const rows = await db<{ code: string; long_url: string; total: string }[]>`
@@ -63,18 +63,20 @@ async function main() {
       LIMIT 20
     `;
 
-    return reply.send(rows.map(row => ({
-      code: row.code,
-      longUrl: row.long_url,
-      totalClicks: Number(row.total)
-    })));
+    return reply.send(
+      rows.map((row) => ({
+        code: row.code,
+        longUrl: row.long_url,
+        totalClicks: Number(row.total),
+      })),
+    );
   });
 
   registerGracefulShutdown(fastify, async () => {
     await db.end();
   });
 
-  await fastify.listen({port: PORT, host: '0.0.0.0'});
+  await fastify.listen({ port: PORT, host: '0.0.0.0' });
 }
 
 main().catch((err) => {
