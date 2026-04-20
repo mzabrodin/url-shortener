@@ -31,19 +31,6 @@ export default defineConfig(({mode}) => {
                             ) return url
                         }
                     },
-                    configure(proxy) {
-                        proxy.on('proxyRes', (proxyRes, req, res) => {
-                            if (
-                                proxyRes.statusCode &&
-                                proxyRes.statusCode >= 400 &&
-                                req.headers.accept?.includes('text/html')
-                            ) {
-                                proxyRes.resume()
-                                res.writeHead(302, {Location: '/not-found'})
-                                res.end()
-                            }
-                        })
-                    },
                 },
             },
         },
