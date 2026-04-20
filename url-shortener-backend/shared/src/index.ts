@@ -1,4 +1,5 @@
 export * from './types';
+export * from './schemas';
 export * from './db/client';
 export * from './redis/client';
 export * from './logger';
