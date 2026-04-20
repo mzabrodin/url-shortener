@@ -16,12 +16,13 @@ const SHORTEN_URL = process.env.SHORTEN_URL!;
 const REDIRECT_URL = process.env.REDIRECT_URL!;
 const STATS_URL = process.env.STATS_URL!;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY!;
+const CLIENT_URL = process.env.CLIENT_URL!;
 
 async function main() {
   const fastify = Fastify({ logger: { level: process.env.LOG_LEVEL! }, trustProxy: true });
 
   await fastify.register(cors, {
-    origin: process.env.CLIENT_URL!,
+    origin: CLIENT_URL,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'x-api-key'],
   });
@@ -62,7 +63,15 @@ async function main() {
     '/:code',
     { schema: { params: codeParamsSchema } },
     (req, reply) => {
-      reply.from(`${REDIRECT_URL}/${req.params.code}`);
+      reply.from(`${REDIRECT_URL}/${req.params.code}`, {
+        onResponse(request, reply, res) {
+          if ((res.statusCode ?? 0) >= 400 && request.headers.accept?.includes('text/html')) {
+            return reply.redirect(`${CLIENT_URL}/not-found`);
+          }
+
+          reply.send(res);
+        },
+      });
     },
   );
 
